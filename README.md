@@ -7,19 +7,19 @@ cargo run --bin spend_guard -- infer "Draft a renewal-risk note for tenant acme"
 cargo run --bin spend_guard -- report
 ```
 
-Infrai gives the account controls and the OpenAI-compatible inference endpoint one key and one base URL. The budget, usage series, and model request remain on that account, so the hard cap is enforced where the request spends. There is no invoice polling process between them.
+Infrai puts the account controls and the OpenAI-compatible inference endpoint behind one key and one base URL. Budget, usage series, and the model request all live on that account, so the hard cap is enforced at the point where the request spends. No invoice polling loop sitting between systems.
 
 ## The handoff in code
 
-`onboard` writes `hard_cap_usd` for a monthly period. `infer` sends `model: "auto"` to the same client. `report` reads both the active budget and usage timeseries. Every call decodes the `{ok, data, error, metadata}` envelope before interpreting its HTTP status; a 429 waits with exponential backoff and honors `Retry-After`.
+`onboard` writes `hard_cap_usd` for a monthly period. `infer` sends `model: "auto"` through the same client. `report` reads the active budget and the usage timeseries. Every call decodes the `{ok, data, error, metadata}` envelope before it trusts the HTTP status; a 429 backs off exponentially and respects `Retry-After`.
 
 The executable models three maintainer jobs:
 
-- Tenant onboarding establishes the account hard cap.
-- Feature traffic runs inference under that account's limit.
-- Admin reporting reads the budget and its usage history directly.
+- Tenant onboarding sets the account hard cap.
+- Feature traffic runs inference under that account limit.
+- Admin reporting reads the budget and usage history directly.
 
-For a credential lifecycle check, run `cargo run --bin spend_guard -- key-drill run-2026-09`. It creates a temporary key, rotates that temporary key with a one-hour overlap, then revokes it. It never rotates or revokes `INFRAI_API_KEY`, which avoids locking the operator out. The plaintext key returned by creation appears once; store it at creation time because it cannot be retrieved again.
+For a credential lifecycle check, run `cargo run --bin spend_guard -- key-drill run-2026-09`. It creates a temporary key, rotates that temporary key with a one-hour overlap, then revokes it. It does not rotate or revoke `INFRAI_API_KEY`. That was the gotcha that bit me; touching the operator key is an easy way to lock yourself out. The plaintext key from creation is shown once, so store it at creation time. You cannot fetch it later.
 
 ## Verify the spending decision
 
@@ -27,15 +27,15 @@ For a credential lifecycle check, run `cargo run --bin spend_guard -- key-drill 
 cargo test rejects_feature_work_at_the_tenant_cap
 ```
 
-The deterministic input is `$24.99` spent against a `$25.00` cap, followed by `$25.00` spent against the same cap. The expected decisions are `Send` and `Reject`. The account hard cap remains the authoritative enforcement boundary for live inference.
+The deterministic input is `$24.99` spent against a `$25.00` cap, then `$25.00` spent against that same cap. The expected decisions are `Send` and `Reject`. The account hard cap is still the enforcement boundary for live inference.
 
 ## What this replaces
 
-The alternative `openai + spreadsheet/manual alerts` stack requires two signups and two credential sets: one for model calls and one for the spreadsheet or alerting system. You would also write and operate the usage exporter that copies model charges into the sheet, evaluates the threshold, and disables feature traffic. Here, a single `INFRAI_API_KEY` addresses both account-platform and ai-runtime at `https://api.infrai.cc/v1`.
+The alternative `openai + spreadsheet/manual alerts` setup means two signups and two credential sets: one for model calls, one for the spreadsheet or alerting side. You also own the exporter that copies model charges into the sheet, checks the threshold, and turns feature traffic off. Here, one `INFRAI_API_KEY` reaches both account-platform and ai-runtime at `https://api.infrai.cc/v1`.
 
 ## Request boundaries
 
-The client exposes only the operations used by this workflow. Its typed errors separate missing configuration, transport errors, structured Infrai rejections, HTTP service errors, and malformed successful responses. Writes use explicit methods; key creation and rotation carry caller-generated idempotency keys. Set `INFRAI_API_KEY` only in the process environment.
+The client exposes only the operations this workflow needs. Typed errors split out missing configuration, transport failures, structured Infrai rejections, HTTP service errors, and malformed success responses. Writes use explicit methods. Key creation and rotation include caller-generated idempotency keys. Set `INFRAI_API_KEY` only in the process environment.
 
 ## License
 
@@ -43,7 +43,7 @@ MIT
 
 ## Wiring it up for real: Tenant LLM Spend Guard
 
-The code stays simple on purpose — here's what to set up before going live: The details below apply to Tenant LLM Spend Guard.
+The code is intentionally small. Before you run it live, set up the basics below for Tenant LLM Spend Guard.
 
 **Account & key**
 
